@@ -1,0 +1,15 @@
+{
+  "name": "行動考場",
+  "short_name": "行動考場",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#111418",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
