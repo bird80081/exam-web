@@ -51,8 +51,10 @@ async function openExam(id) {
   if (existing && existing.finished) { sess = existing; return showResult(); }
   if (existing) {
     sess = existing;
+    migrateSess();
     cur = sess.answers.findIndex(a => a === null);
     if (cur < 0) cur = 0;
+    if (sess.pausedAt) return showPauseScreen();
     return showQuestion();
   }
   // 開卷確認頁
@@ -78,6 +80,9 @@ function startExam() {
     examId: exam.id,
     started: Date.now(),
     answers: exam.questions.map(() => null),
+    flags: exam.questions.map(() => false),
+    pausedTotal: 0,
+    pausedAt: null,
     finished: false,
   };
   cur = 0;
@@ -87,8 +92,14 @@ function startExam() {
 }
 
 /* ---------- 應試 ---------- */
+function migrateSess() { // 舊紀錄補欄位
+  if (!sess.flags) sess.flags = exam.questions.map(() => false);
+  if (sess.pausedTotal === undefined) sess.pausedTotal = 0;
+  if (sess.pausedAt === undefined) sess.pausedAt = null;
+}
 function remainSec() {
-  return exam.minutes * 60 - Math.floor((Date.now() - sess.started) / 1000);
+  const now = sess.pausedAt || Date.now();
+  return exam.minutes * 60 - Math.floor((now - sess.started - sess.pausedTotal) / 1000);
 }
 function fmt(sec) {
   const m = Math.floor(Math.abs(sec) / 60), s = Math.abs(sec) % 60;
@@ -113,11 +124,14 @@ function showQuestion() {
   const answered = sess.answers.filter(a => a !== null && a !== "").length;
   $app.innerHTML = `
     <div class="exam-top">
-      <button class="small ghost" onclick="showGridView()">題目一覽</button>
-      <span class="muted">${answered}/${exam.questions.length} 已答</span>
+      <button class="small ghost" onclick="showGridView()">一覽</button>
+      <span class="muted">${answered}/${exam.questions.length}</span>
+      <button class="small ghost" onclick="pauseExam()">⏸ 暫停</button>
       <span class="timer" id="timer"></span>
     </div>
-    <div class="q-num">第 ${cur + 1} 題／${q.section}${q.essay ? `（${q.points} 分）` : ""}</div>
+    <div class="q-num">第 ${cur + 1} 題／${q.section}${q.essay ? `（${q.points} 分）` : ""}
+      <button class="small flag-btn ${sess.flags[cur] ? "flagged" : ""}" onclick="toggleFlag()">🚩${sess.flags[cur] ? " 已標疑問" : " 有疑問"}</button>
+    </div>
     <div class="q-stem">${q.stem}</div>
     ${q.essay ? essayBox(q) : q.options.map((opt, i) => {
       const label = "ABCD"[i];
@@ -158,6 +172,42 @@ function pick(label) {
   }
 }
 
+function stashEssay() {
+  const q = exam.questions[cur];
+  if (q && q.essay) {
+    const el = document.getElementById("essay");
+    if (el) { sess.answers[cur] = el.value; saveSession(); }
+  }
+}
+function toggleFlag() {
+  stashEssay();
+  sess.flags[cur] = !sess.flags[cur];
+  saveSession();
+  showQuestion();
+}
+function pauseExam() {
+  stashEssay();
+  sess.pausedAt = Date.now();
+  saveSession();
+  showPauseScreen();
+}
+function showPauseScreen() {
+  clearInterval(timerId);
+  $app.innerHTML = `
+    <div class="card" style="text-align:center;margin-top:40px">
+      <h2>⏸ 已暫停</h2>
+      <p class="muted">計時已停止，剩餘 ${fmt(remainSec())}。<br>休息一下，回來再繼續。</p>
+      <div class="btn-row">
+        <button onclick="resumeExam()">繼續作答</button>
+      </div>
+    </div>`;
+}
+function resumeExam() {
+  sess.pausedTotal += Date.now() - sess.pausedAt;
+  sess.pausedAt = null;
+  saveSession();
+  showQuestion();
+}
 function nav(d) {
   const q = exam.questions[cur];
   if (q.essay) {
@@ -182,9 +232,9 @@ function showGridView() {
     <div class="q-grid">
       ${exam.questions.map((qq, i) => `
         <button class="q-dot ${sess.answers[i] !== null && sess.answers[i] !== "" ? "answered" : ""} ${i === cur ? "current" : ""}"
-          onclick="cur=${i};showQuestion()">${i + 1}</button>`).join("")}
+          onclick="cur=${i};showQuestion()">${sess.flags[i] ? "🚩" : ""}${i + 1}</button>`).join("")}
     </div>
-    <p class="muted">綠底＝已作答。點題號跳題。</p>
+    <p class="muted">綠底＝已作答，🚩＝標了疑問。點題號跳題。</p>
     <div class="btn-row">
       <button class="ghost" onclick="showQuestion()">回到題目</button>
       <button onclick="confirmSubmit()">交卷</button>
@@ -210,8 +260,10 @@ function confirmSubmit() {
 /* ---------- 交卷與成績 ---------- */
 function grade() {
   clearInterval(timerId);
+  if (sess.pausedAt) { sess.pausedTotal += Date.now() - sess.pausedAt; sess.pausedAt = null; }
   sess.finished = true;
   sess.submitted = Date.now();
+  sess.usedMinutes = Math.round((sess.submitted - sess.started - sess.pausedTotal) / 60000);
   let got = 0, mcTotal = 0, mcRight = 0, essayFull = 0;
   exam.questions.forEach((q, i) => {
     if (q.essay) { essayFull += q.points; return; }
@@ -230,12 +282,13 @@ function showResult() {
   clearInterval(timerId);
   const essayQs = exam.questions.filter(q => q.essay);
   const essayFull = essayQs.reduce((t, q) => t + q.points, 0);
-  const usedMin = Math.round((sess.submitted - sess.started) / 60000);
+  const usedMin = sess.usedMinutes !== undefined ? sess.usedMinutes : Math.round((sess.submitted - sess.started) / 60000);
+  const flagged = (sess.flags || []).filter(Boolean).length;
   $app.innerHTML = `
     <h1>${exam.title}．成績</h1>
     <div class="card">
       <div class="score-big">${sess.mcScore}<span class="muted" style="font-size:1rem"> / ${fullScore() - essayFull} 選擇題得分</span></div>
-      <p>選擇題答對 ${sess.mcRight}/${sess.mcTotal} 題．作答 ${usedMin} 分鐘</p>
+      <p>選擇題答對 ${sess.mcRight}/${sess.mcTotal} 題．作答 ${usedMin} 分鐘${flagged ? `．🚩 疑問 ${flagged} 題` : ""}</p>
       ${essayFull ? `<p class="muted">申論 ${essayQs.length} 題（${essayFull} 分）待 AI 批改——按下方「匯出作答紀錄」貼給 Claude。</p>` : ""}
       <div class="btn-row">
         <button onclick="exportResult()">匯出作答紀錄</button>
@@ -250,7 +303,7 @@ function resultRow(q, i) {
   const user = sess.answers[i];
   if (q.essay) {
     return `<div class="result-q">
-      <div class="q-num">第 ${i + 1} 題．申論 <span class="tag pend">待批改</span></div>
+      <div class="q-num">第 ${i + 1} 題．申論 <span class="tag pend">待批改</span>${(sess.flags||[])[i] ? ' <span class="tag pend">🚩 疑問</span>' : ''}</div>
       <div class="q-stem">${q.stem}</div>
       <div class="explain">你的作答：\n${user ? escapeHtml(user) : "（未作答）"}</div>
     </div>`;
@@ -258,7 +311,7 @@ function resultRow(q, i) {
   const right = user === q.answer;
   return `<div class="result-q">
     <div class="q-num">第 ${i + 1} 題．${q.point || q.section}
-      <span class="tag ${right ? "ok" : "bad"}">${right ? "答對" : user ? `答錯（你選 ${user}）` : "未作答"}</span></div>
+      <span class="tag ${right ? "ok" : "bad"}">${right ? "答對" : user ? `答錯（你選 ${user}）` : "未作答"}</span>${(sess.flags||[])[i] ? ' <span class="tag pend">🚩 疑問</span>' : ''}</div>
     <div class="q-stem">${q.stem}</div>
     ${q.options.map((opt, j) => {
       const label = "ABCD"[j];
@@ -277,7 +330,8 @@ function exportResult() {
     exam: exam.title,
     subject: exam.subject,
     date: new Date(sess.submitted).toISOString().slice(0, 10),
-    usedMinutes: Math.round((sess.submitted - sess.started) / 60000),
+    usedMinutes: sess.usedMinutes !== undefined ? sess.usedMinutes : Math.round((sess.submitted - sess.started) / 60000),
+    flagged: exam.questions.map((q, i) => (sess.flags || [])[i] ? { n: i + 1, point: q.point || q.section, stem: q.stem } : null).filter(Boolean),
     mcScore: sess.mcScore,
     mcRight: `${sess.mcRight}/${sess.mcTotal}`,
     wrong: exam.questions

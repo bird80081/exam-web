@@ -190,3 +190,21 @@ textarea:focus { outline: none; border-color: var(--accent); }
   font-size: 0.9rem;
   z-index: 99;
 }
+
+/* ===== 疑問標記 ===== */
+.flag-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1.5px solid var(--line);
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+}
+.flag-btn.flagged {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  font-weight: 700;
+}
+.q-dot { font-size: 0.8rem; }
