@@ -243,6 +243,7 @@ function showGridView() {
 }
 
 function confirmSubmit() {
+  stashEssay();
   const blank = sess.answers.filter(a => a === null || a === "").length;
   const over = remainSec() < 0;
   $app.innerHTML = `
