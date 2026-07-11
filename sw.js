@@ -1,5 +1,5 @@
 /* 離線快取：安裝時抓核心檔與題庫，之後網路優先、失敗用快取（公車斷網也能考） */
-const CACHE = "examweb-v1";
+const CACHE = "examweb-v2";
 const CORE = ["./", "index.html", "style.css", "app.js", "manifest.json", "exams/index.json"];
 
 self.addEventListener("install", e => {
@@ -23,7 +23,7 @@ self.addEventListener("activate", e => {
 
 self.addEventListener("fetch", e => {
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" })
       .then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));

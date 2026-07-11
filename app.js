@@ -279,8 +279,14 @@ function grade() {
   showResult();
 }
 
-function showResult() {
+async function showResult() {
   clearInterval(timerId);
+  let review = null;
+  try {
+    const r = await fetch(`reviews/${exam.id}.json`, { cache: "no-store" });
+    if (r.ok) review = await r.json();
+  } catch {}
+  exam.review = review;
   const essayQs = exam.questions.filter(q => q.essay);
   const essayFull = essayQs.reduce((t, q) => t + q.points, 0);
   const usedMin = sess.usedMinutes !== undefined ? sess.usedMinutes : Math.round((sess.submitted - sess.started) / 60000);
@@ -288,9 +294,10 @@ function showResult() {
   $app.innerHTML = `
     <h1>${exam.title}．成績</h1>
     <div class="card">
-      <div class="score-big">${sess.mcScore}<span class="muted" style="font-size:1rem"> / ${fullScore() - essayFull} 選擇題得分</span></div>
+      ${exam.review ? `<div class="score-big">${exam.review.total}<span class="muted" style="font-size:1rem"> / ${exam.review.totalMax} 全卷（${exam.review.pass ? "✅ 過及格線" : "未達及格線"}）</span></div>
+      <p class="muted">選擇 ${sess.mcScore} 分＋申論 ${exam.review.essays.reduce((t,e)=>t+e.score,0)} 分${exam.review.note ? "．" + exam.review.note : ""}．批改日 ${exam.review.gradedAt}</p>` : `<div class="score-big">${sess.mcScore}<span class="muted" style="font-size:1rem"> / ${fullScore() - essayFull} 選擇題得分</span></div>`}
       <p>選擇題答對 ${sess.mcRight}/${sess.mcTotal} 題．作答 ${usedMin} 分鐘${flagged ? `．🚩 疑問 ${flagged} 題` : ""}</p>
-      ${essayFull ? `<p class="muted">申論 ${essayQs.length} 題（${essayFull} 分）待 AI 批改——按下方「匯出作答紀錄」貼給 Claude。</p>` : ""}
+      ${essayFull && !exam.review ? `<p class="muted">申論 ${essayQs.length} 題（${essayFull} 分）待 AI 批改——按下方「匯出作答紀錄」貼給 Claude。</p>` : ""}
       <div class="btn-row">
         <button onclick="exportResult()">匯出作答紀錄</button>
         <button class="ghost" onclick="showHome()">回首頁</button>
@@ -303,10 +310,12 @@ function showResult() {
 function resultRow(q, i) {
   const user = sess.answers[i];
   if (q.essay) {
+    const rv = exam.review && exam.review.essays.find(e => e.n === i + 1);
     return `<div class="result-q">
-      <div class="q-num">第 ${i + 1} 題．申論 <span class="tag pend">待批改</span>${(sess.flags||[])[i] ? ' <span class="tag pend">🚩 疑問</span>' : ''}</div>
+      <div class="q-num">第 ${i + 1} 題．申論 ${rv ? `<span class="tag ok">${rv.score}/${rv.max} 分</span>` : '<span class="tag pend">待批改</span>'}${(sess.flags||[])[i] ? ' <span class="tag pend">🚩 疑問</span>' : ''}</div>
       <div class="q-stem">${q.stem}</div>
       <div class="explain">你的作答：\n${user ? escapeHtml(user) : "（未作答）"}</div>
+      ${rv ? `<div class="explain" style="border-left-color:var(--warn)">批改評語：\n${escapeHtml(rv.comment)}</div>` : ""}
     </div>`;
   }
   const right = user === q.answer;
